@@ -1,0 +1,407 @@
+diff --git a/configure.ac b/configure.ac
+index b2ec4a7..6009bfd 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -23,7 +23,7 @@ AC_SUBST(lt_major)
+ AC_SUBST(lt_revision)
+ AC_SUBST(lt_age)
+ 
+-all_drivers="upeke2 upekts upektc upeksonly vcom5s uru4000 fdu2000 aes1610 aes1660 aes2501 aes2550 aes2660 aes4000 vfs101 vfs301"
++all_drivers="upeke2 upekts upektc upeksonly vcom5s uru4000 fdu2000 aes1610 aes1660 aes2501 aes2550 aes2660 aes3500 aes4000 vfs101 vfs301"
+ 
+ require_imaging='no'
+ require_aeslib='no'
+@@ -40,6 +40,7 @@ enable_aes1660='no'
+ enable_aes2501='no'
+ enable_aes2550='no'
+ enable_aes2660='no'
++enable_aes3500='no'
+ enable_aes4000='no'
+ enable_vfs101='no'
+ enable_vfs301='no'
+@@ -111,6 +112,12 @@ for driver in `echo ${drivers} | sed -e 's/,/ /g' -e 's/,$//g'`; do
+ 			require_aesX660="yes"
+ 			enable_aes2660="yes"
+ 		;;
++		aes3500)
++			AC_DEFINE([ENABLE_AES3500], [], [Build AuthenTec AES3500 driver])
++			require_aeslib="yes"
++			require_imaging="yes"
++			enable_aes3500="yes"
++		;;
+ 		aes4000)
+ 			AC_DEFINE([ENABLE_AES4000], [], [Build AuthenTec AES4000 driver])
+ 			require_aeslib="yes"
+@@ -140,6 +147,7 @@ AM_CONDITIONAL([ENABLE_AES1660], [test "$enable_aes1660" = "yes"])
+ AM_CONDITIONAL([ENABLE_AES2501], [test "$enable_aes2501" = "yes"])
+ AM_CONDITIONAL([ENABLE_AES2550], [test "$enable_aes2550" = "yes"])
+ AM_CONDITIONAL([ENABLE_AES2660], [test "$enable_aes2660" = "yes"])
++AM_CONDITIONAL([ENABLE_AES3500], [test "$enable_aes3500" = "yes"])
+ AM_CONDITIONAL([ENABLE_AES4000], [test "$enable_aes4000" = "yes"])
+ AM_CONDITIONAL([REQUIRE_AESLIB], [test "$require_aeslib" = "yes"])
+ AM_CONDITIONAL([REQUIRE_AESX660], [test "$require_aesX660" = "yes"])
+@@ -341,6 +349,11 @@ if test x$enable_aes2660 != xno ; then
+ else
+ 	AC_MSG_NOTICE([   aes2660 driver disabled])
+ fi
++if test x$enable_aes3500 != xno ; then
++	AC_MSG_NOTICE([** aes3500 driver enabled])
++else
++	AC_MSG_NOTICE([   aes3500 driver disabled])
++fi
+ if test x$enable_aes4000 != xno ; then
+ 	AC_MSG_NOTICE([** aes4000 driver enabled])
+ else
+diff --git a/libfprint/Makefile.am b/libfprint/Makefile.am
+index 7a16782..17bf2b2 100644
+--- a/libfprint/Makefile.am
++++ b/libfprint/Makefile.am
+@@ -12,6 +12,7 @@ AES1660_SRC = drivers/aes1660.c drivers/aes1660.h
+ AES2501_SRC = drivers/aes2501.c drivers/aes2501.h
+ AES2550_SRC = drivers/aes2550.c drivers/aes2550.h
+ AES2660_SRC = drivers/aes2660.c drivers/aes2660.h
++AES3500_SRC = drivers/aes3500.c
+ AES4000_SRC = drivers/aes4000.c
+ FDU2000_SRC = drivers/fdu2000.c
+ VCOM5S_SRC = drivers/vcom5s.c
+@@ -29,6 +30,7 @@ EXTRA_DIST = \
+ 	$(AES2501_SRC)		\
+ 	$(AES2550_SRC)		\
+ 	$(AES2660_SRC)		\
++	$(AES3500_SRC)		\
+ 	$(AES4000_SRC)		\
+ 	$(FDU2000_SRC)		\
+ 	$(VCOM5S_SRC)		\
+@@ -145,6 +147,10 @@ if ENABLE_AES2660
+ DRIVER_SRC += $(AES2660_SRC)
+ endif
+ 
++if ENABLE_AES3500
++DRIVER_SRC += $(AES3500_SRC)
++endif
++
+ if ENABLE_AES4000
+ DRIVER_SRC += $(AES4000_SRC)
+ endif
+diff --git a/libfprint/core.c b/libfprint/core.c
+index 5315fdc..584e762 100644
+--- a/libfprint/core.c
++++ b/libfprint/core.c
+@@ -349,6 +349,9 @@ static struct fp_driver * const primitive_drivers[] = {
+ };
+ 
+ static struct fp_img_driver * const img_drivers[] = {
++#ifdef ENABLE_AES3500
++	&aes3500_driver,
++#endif
+ #ifdef ENABLE_AES4000
+ 	&aes4000_driver,
+ #endif
+diff --git a/libfprint/drivers/aes3500.c b/libfprint/drivers/aes3500.c
+new file mode 100644
+index 0000000..0543e20
+--- /dev/null
++++ b/libfprint/drivers/aes3500.c
+@@ -0,0 +1,288 @@
++/*
++ * AuthenTec AES3500 driver for libfprint
++ *
++ * AES3500 has a press-typed sensor, with 128x128 in dimension. Which is
++ * similiar to AES4000, except the later is in 96x96. This driver is a
++ * direct fork of AES4000 driver code, with parameters tuned by
++ * monitoring the sniffed usb transfer.
++ *
++ * Thanks Rafael Toledo for the Windows driver and the help.
++ *
++ * Copyright (C) 2011 Juvenn Woo <machese@gmail.com>
++ * Copyright (C) 2007-2008 Daniel Drake <dsd@gentoo.org>
++ *
++ * This library is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License as
++ * published by the Free Software Foundation; either version 2.1 of the
++ * License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
++ * 02110-1301 USA
++ */
++
++#define FP_COMPONENT "aes3500"
++
++#include <errno.h>
++
++#include <glib.h>
++#include <libusb.h>
++
++#include <aeslib.h>
++#include <fp_internal.h>
++
++#define CTRL_TIMEOUT	1000
++#define EP_IN			(1 | LIBUSB_ENDPOINT_IN)
++#define EP_OUT			(2 | LIBUSB_ENDPOINT_OUT)
++#define DATA_BUFLEN		0x2089
++#define NR_SUBARRAYS	8
++#define SUBARRAY_LEN	1024
++
++#define IMG_HEIGHT 128
++#define IMG_WIDTH 128
++#define ENLARGE_FACTOR 2
++
++struct aes3500_dev {
++	struct libusb_transfer *img_trf;
++};
++
++
++/* TODO: figure out the init_reqs to improve the
++ * image quality of the device. */
++
++static const struct aes_regwrite init_reqs[] = {
++	/* master reset */
++	{ 0x80, 0x01 },
++	{ 0, 0 },
++	{ 0x80, 0x00 },
++	{ 0, 0 },
++
++	{ 0x81, 0x00 },
++	{ 0x80, 0x00 },
++	{ 0, 0 },
++
++	/* scan reset */
++	{ 0x80, 0x02 },
++	{ 0, 0 },
++	{ 0x80, 0x00 },
++	{ 0, 0 },
++
++	/* disable register buffering */
++	{ 0x80, 0x04 },
++	{ 0, 0 },
++	{ 0x80, 0x00 },
++	{ 0, 0 },
++
++	{ 0x81, 0x00 },
++	{ 0, 0 },
++	/* windows driver reads registers now (81 02) */
++	{ 0x80, 0x00 },
++	{ 0x81, 0x00 },
++
++	/* set excitation bias current: 2mhz drive ring frequency,
++	 * 4V drive ring voltage, 16.5mA excitation bias */
++	{ 0x82, 0x04 },
++
++	/* continuously sample drive ring for finger detection,
++	 * 62.50ms debounce delay */
++	{ 0x83, 0x13 },
++
++	{ 0x84, 0x07 }, /* set calibration resistance to 12 kiloohms */
++	{ 0x85, 0x3d }, /* set calibration capacitance */
++	{ 0x86, 0x03 }, /* detect drive voltage */
++	{ 0x87, 0x01 }, /* set detection frequency to 125khz */
++	{ 0x88, 0x02 }, /* set column scan period */
++	{ 0x89, 0x02 }, /* set measure drive */
++	{ 0x8a, 0x33 }, /* set measure frequency and sense amplifier bias */
++	{ 0x8b, 0x33 }, /* set matrix pattern */
++	{ 0x8c, 0x0f }, /* set demodulation phase 1 */
++	{ 0x8d, 0x04 }, /* set demodulation phase 2 */
++	{ 0x8e, 0x23 }, /* set sensor gain */
++	{ 0x8f, 0x07 }, /* set image parameters */
++	{ 0x90, 0x00 }, /* carrier offset null */
++	{ 0x91, 0x1c }, /* set A/D reference high */
++	{ 0x92, 0x08 }, /* set A/D reference low */
++	{ 0x93, 0x00 }, /* set start row to 0 */
++	{ 0x94, 0x07 }, /* set end row */
++	{ 0x95, 0x00 }, /* set start column to 0 */
++	{ 0x96, 0x1f }, /* set end column */
++	{ 0x97, 0x04 }, /* data format and thresholds */
++	{ 0x98, 0x28 }, /* image data control */
++	{ 0x99, 0x00 }, /* disable general purpose outputs */
++	{ 0x9a, 0x0b }, /* set initial scan state */
++	{ 0x9b, 0x00 }, /* clear challenge word bits */
++	{ 0x9c, 0x00 }, /* clear challenge word bits */
++	{ 0x9d, 0x09 }, /* set some challenge word bits */
++	{ 0x9e, 0x53 }, /* clear challenge word bits */
++	{ 0x9f, 0x6b }, /* set some challenge word bits */
++	{ 0, 0 },
++
++	{ 0x80, 0x00 },
++	{ 0x81, 0x00 },
++	{ 0, 0 },
++	{ 0x81, 0x04 },
++	{ 0, 0 },
++	{ 0x81, 0x00 },
++};
++
++static void do_capture(struct fp_img_dev *dev);
++
++static void img_cb(struct libusb_transfer *transfer)
++{
++	struct fp_img_dev *dev = transfer->user_data;
++	struct aes3500_dev *aesdev = dev->priv;
++	unsigned char *ptr = transfer->buffer;
++	struct fp_img *tmp;
++	struct fp_img *img;
++	int i;
++
++	if (transfer->status == LIBUSB_TRANSFER_CANCELLED) {
++		goto err;
++	} else if (transfer->status != LIBUSB_TRANSFER_COMPLETED) {
++		fp_err("libusb transfer not completed error");
++		fpi_imgdev_session_error(dev, -EIO);
++		goto err;
++	} else if (transfer->length != transfer->actual_length) {
++		fp_err("libusb transfer length not match: %d vs %d(actual)", transfer->length, transfer->actual_length);
++		fpi_imgdev_session_error(dev, -EPROTO);
++		goto err;
++	}
++
++	fpi_imgdev_report_finger_status(dev, TRUE);
++
++	tmp = fpi_img_new(IMG_WIDTH * IMG_HEIGHT);
++	tmp->width = IMG_WIDTH;
++	tmp->height = IMG_HEIGHT;
++	tmp->flags = FP_IMG_COLORS_INVERTED | FP_IMG_V_FLIPPED | FP_IMG_H_FLIPPED;
++	for (i = 0; i < NR_SUBARRAYS; i++) {
++		fp_dbg("subarray header byte %02x", *ptr);
++		ptr++;
++		aes_assemble_image(ptr, 128, 16, tmp->data + (i * 128 * 16));
++		ptr += SUBARRAY_LEN;
++	}
++
++	/* FIXME: this is an ugly hack to make the image big enough for NBIS
++	 * to process reliably */
++	img = fpi_im_resize(tmp, ENLARGE_FACTOR, ENLARGE_FACTOR);
++	fp_img_free(tmp);
++	fpi_imgdev_image_captured(dev, img);
++
++	/* FIXME: rather than assuming finger has gone, we should poll regs until
++	 * it really has, then restart the capture */
++	fpi_imgdev_report_finger_status(dev, FALSE);
++
++	do_capture(dev);
++
++err:
++	g_free(transfer->buffer);
++	aesdev->img_trf = NULL;
++	libusb_free_transfer(transfer);
++}
++
++static void do_capture(struct fp_img_dev *dev)
++{
++	struct aes3500_dev *aesdev = dev->priv;
++	unsigned char *data;
++	int r;
++
++	aesdev->img_trf = libusb_alloc_transfer(0);
++	if (!aesdev->img_trf) {
++		fp_err("libusb_alloc_transfer error");
++		fpi_imgdev_session_error(dev, -EIO);
++		return;
++	}
++
++	data = g_malloc(DATA_BUFLEN);
++	libusb_fill_bulk_transfer(aesdev->img_trf, dev->udev, EP_IN, data,
++		DATA_BUFLEN, img_cb, dev, 0);
++
++	r = libusb_submit_transfer(aesdev->img_trf);
++	if (r < 0) {
++		fp_err("libusb_submit_transfer error");
++		g_free(data);
++		libusb_free_transfer(aesdev->img_trf);
++		aesdev->img_trf = NULL;
++		fpi_imgdev_session_error(dev, r);
++	}
++}
++
++static void init_reqs_cb(struct fp_img_dev *dev, int result, void *user_data)
++{
++	fpi_imgdev_activate_complete(dev, result);
++	if (result == 0)
++		do_capture(dev);
++}
++
++static int dev_activate(struct fp_img_dev *dev, enum fp_imgdev_state state)
++{
++	aes_write_regv(dev, init_reqs, G_N_ELEMENTS(init_reqs), init_reqs_cb, NULL);
++	return 0;
++}
++
++static void dev_deactivate(struct fp_img_dev *dev)
++{
++	struct aes3500_dev *aesdev = dev->priv;
++
++	/* FIXME: should wait for cancellation to complete before returning
++	 * from deactivation, otherwise app may legally exit before we've
++	 * cleaned up */
++	if (aesdev->img_trf)
++		libusb_cancel_transfer(aesdev->img_trf);
++	fpi_imgdev_deactivate_complete(dev);
++}
++
++static int dev_init(struct fp_img_dev *dev, unsigned long driver_data)
++{
++	int r;
++
++	r = libusb_claim_interface(dev->udev, 0);
++	if (r < 0)
++		fp_err("could not claim interface 0");
++
++	dev->priv = g_malloc0(sizeof(struct aes3500_dev));
++
++	if (r == 0)
++		fpi_imgdev_open_complete(dev, 0);
++
++	return r;
++}
++
++static void dev_deinit(struct fp_img_dev *dev)
++{
++	g_free(dev->priv);
++	libusb_release_interface(dev->udev, 0);
++	fpi_imgdev_close_complete(dev);
++}
++
++static const struct usb_id id_table[] = {
++	{ .vendor = 0x08ff, .product = 0x5731 },
++	{ 0, 0, 0, },
++};
++
++struct fp_img_driver aes3500_driver = {
++	.driver = {
++		.id = 11,
++		.name = FP_COMPONENT,
++		.full_name = "AuthenTec AES3500",
++		.id_table = id_table,
++		.scan_type = FP_SCAN_TYPE_PRESS,
++	},
++	.flags = 0,
++	.img_height = IMG_HEIGHT * ENLARGE_FACTOR,
++	.img_width = IMG_WIDTH * ENLARGE_FACTOR,
++
++	/* temporarily lowered until image quality improves */
++	.bz3_threshold = 9,
++
++	.open = dev_init,
++	.close = dev_deinit,
++	.activate = dev_activate,
++	.deactivate = dev_deactivate,
++};
++
+diff --git a/libfprint/fp_internal.h b/libfprint/fp_internal.h
+index 04d304f..a8a26a9 100644
+--- a/libfprint/fp_internal.h
++++ b/libfprint/fp_internal.h
+@@ -267,6 +267,9 @@ extern struct fp_img_driver aes2550_driver;
+ #ifdef ENABLE_AES2660
+ extern struct fp_img_driver aes2660_driver;
+ #endif
++#ifdef ENABLE_AES3500
++extern struct fp_img_driver aes3500_driver;
++#endif
+ #ifdef ENABLE_AES4000
+ extern struct fp_img_driver aes4000_driver;
+ #endif
