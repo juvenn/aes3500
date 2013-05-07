@@ -74,9 +74,8 @@ For discussions, please join us on [fprint@lists.freedesktop.org][3].
 
 Thanks Rafael Toledo for the Windows driver and the help.
 
-Copyright (C) 2011 Juvenn Woo
-
-Copyright (C) 2007-2008 Daniel Drake
+* Copyright (C) 2011 Juvenn Woo
+* Copyright (C) 2007-2008 Daniel Drake
 
 Licensed under the GPL version 2, the same as libfprint.
 
