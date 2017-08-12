@@ -117,3 +117,5 @@ Thanks Rafael Toledo for the Windows driver and the help.
 [repo]: http://cgit.freedesktop.org/libfprint/libfprint
 [@dsd]: https://github.com/dsd "The creator of libfprint itself"
 [@juvenn]: https://github.com/juvenn
+
+http://www.reactivated.net/weblog-content/20050806-reverse-0.2.txt
